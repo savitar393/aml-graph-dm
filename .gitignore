@@ -1,0 +1,21 @@
+# data and model artifacts
+data/raw/*
+data/processed/*
+models/*
+reports/figures/*
+reports/tables/*
+
+# keep folders
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!models/.gitkeep
+!reports/figures/.gitkeep
+!reports/tables/.gitkeep
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.ipynb_checkpoints/
+.DS_Store

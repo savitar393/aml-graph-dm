@@ -1,0 +1,22 @@
+pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
+matplotlib>=3.8.0
+networkx>=3.2.0
+pyarrow>=15.0.0
+joblib>=1.3.0
+tqdm>=4.66.0
+lightgbm>=4.3.0
+xgboost>=2.0.0
+imbalanced-learn>=0.12.0
+streamlit>=1.36.0
+plotly>=5.22.0
+shap>=0.45.0
+python-dotenv>=1.0.1
+kaggle>=1.6.17
+kagglehub>=0.2.9
+notebook==7.5
+
+# Optional, install only if you do the GNN extension:
+# torch
+# torch-geometric
