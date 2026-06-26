@@ -16,7 +16,8 @@ python-dotenv>=1.0.1
 kaggle>=1.6.17
 kagglehub>=0.2.9
 notebook==7.5
+pyvis>=0.3.2
 
-# Optional, install only if you do the GNN extension:
+# Optional, for GNN:
 # torch
 # torch-geometric

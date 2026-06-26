@@ -5,59 +5,143 @@ from pathlib import Path
 import joblib
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.data.load_data import load_transactions
 from src.features.tabular_features import add_basic_transaction_features, make_model_matrix
 from src.features.graph_features import add_account_graph_aggregate_features
+from src.visualization.graph_viz import get_local_transactions, build_pyvis_graph
 
 
 st.set_page_config(page_title="AML Graph Scoring Demo", layout="wide")
 
-st.title("AML Graph-Enhanced Scoring Demo")
+st.title("AML Graph-Enhanced Scoring Dashboard")
 st.write(
-    "Upload a transaction CSV with the same schema as the training data. "
-    "The app will build basic transaction and graph aggregate features, then score suspicious transactions."
+    "This dashboard scores transactions using the trained AML model and shows "
+    "a local transaction graph around selected suspicious alerts."
 )
 
-model_path = Path("models/best_model.joblib")
+model_path = Path("models/best_model_bundle.joblib")
+
 if not model_path.exists():
-    st.warning("No trained model found at models/best_model.joblib. Train a model first.")
-else:
-    model = joblib.load(model_path)
+    st.error("No trained model bundle found at models/best_model_bundle.joblib.")
+    st.stop()
 
-uploaded = st.file_uploader("Upload transaction CSV", type=["csv"])
+bundle = joblib.load(model_path)
+model = bundle["model"]
+feature_columns = bundle["feature_columns"]
+feature_set = bundle.get("feature_set", "raw_plus_graph")
+threshold = bundle.get("threshold", 0.5)
 
-if uploaded is not None:
-    temp_path = Path("data/sample/uploaded_transactions.csv")
-    temp_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path.write_bytes(uploaded.getvalue())
+st.sidebar.header("Settings")
+uploaded = st.sidebar.file_uploader("Upload transaction CSV", type=["csv"])
+top_n = st.sidebar.slider("Top suspicious transactions", min_value=10, max_value=200, value=50)
+score_threshold = st.sidebar.slider("Score threshold", 0.0, 1.0, float(threshold), 0.01)
+time_window_hours = st.sidebar.selectbox("Graph time window", [6, 12, 24, 72, 168], index=2)
+max_edges = st.sidebar.slider("Maximum graph edges", min_value=20, max_value=300, value=120)
 
-    df = load_transactions(temp_path)
-    df = add_basic_transaction_features(df)
+if uploaded is None:
+    st.info("Upload a transaction CSV to start scoring.")
+    st.stop()
+
+temp_path = Path("data/sample/uploaded_transactions.csv")
+temp_path.parent.mkdir(parents=True, exist_ok=True)
+temp_path.write_bytes(uploaded.getvalue())
+
+df = load_transactions(temp_path)
+df = add_basic_transaction_features(df)
+
+if feature_set == "raw_plus_graph":
     df = add_account_graph_aggregate_features(df)
-    X, _ = make_model_matrix(df, include_graph_features=True)
 
-    if model_path.exists():
-        # Align columns if model was saved with feature_names_in_
-        if hasattr(model, "feature_names_in_"):
-            for col in model.feature_names_in_:
-                if col not in X.columns:
-                    X[col] = 0
-            X = X[list(model.feature_names_in_)]
+X, y = make_model_matrix(df, include_graph_features=(feature_set == "raw_plus_graph"))
 
-        scores = model.predict_proba(X)[:, 1]
-        result = df.copy()
-        result["suspicious_score"] = scores
-        result["predicted_label"] = (result["suspicious_score"] >= 0.5).astype(int)
+# Align feature columns with training.
+X = X.reindex(columns=feature_columns, fill_value=0)
 
-        st.subheader("Top suspicious transactions")
-        display_cols = [
-            c for c in [
-                "timestamp", "sender_id", "receiver_id", "amount_paid",
-                "payment_currency", "payment_format", "suspicious_score", "predicted_label"
-            ] if c in result.columns
-        ]
-        st.dataframe(result.sort_values("suspicious_score", ascending=False)[display_cols].head(100))
+scores = model.predict_proba(X)[:, 1]
 
-        csv = result.to_csv(index=False).encode("utf-8")
-        st.download_button("Download scored transactions", csv, "scored_transactions.csv", "text/csv")
+result = df.copy()
+result["suspicious_score"] = scores
+result["predicted_label"] = (result["suspicious_score"] >= score_threshold).astype(int)
+
+st.subheader("Scoring Summary")
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Total transactions", f"{len(result):,}")
+c2.metric("Predicted suspicious", f"{int(result['predicted_label'].sum()):,}")
+c3.metric("Highest score", f"{result['suspicious_score'].max():.4f}")
+c4.metric("Average score", f"{result['suspicious_score'].mean():.4f}")
+
+st.subheader("Top Suspicious Transactions")
+
+display_cols = [
+    c for c in [
+        "timestamp",
+        "sender_id",
+        "receiver_id",
+        "amount_paid",
+        "payment_currency",
+        "payment_format",
+        "suspicious_score",
+        "predicted_label",
+        "is_laundering",
+    ] if c in result.columns
+]
+
+ranked = result.sort_values("suspicious_score", ascending=False).head(top_n).copy()
+st.dataframe(ranked[display_cols], use_container_width=True)
+
+selected_pos = st.selectbox(
+    "Select transaction rank for graph visualization",
+    options=list(range(len(ranked))),
+    format_func=lambda i: (
+        f"Rank {i+1} | score={ranked.iloc[i]['suspicious_score']:.4f} | "
+        f"{ranked.iloc[i]['sender_id']} → {ranked.iloc[i]['receiver_id']}"
+    )
+)
+
+selected_idx = ranked.index[selected_pos]
+selected_row = result.loc[selected_idx]
+
+st.subheader("Selected Transaction")
+
+st.write({
+    "timestamp": str(selected_row.get("timestamp", "")),
+    "sender": selected_row.get("sender_id", ""),
+    "receiver": selected_row.get("receiver_id", ""),
+    "amount_paid": selected_row.get("amount_paid", ""),
+    "payment_format": selected_row.get("payment_format", ""),
+    "suspicious_score": float(selected_row.get("suspicious_score", 0)),
+    "predicted_label": int(selected_row.get("predicted_label", 0)),
+})
+
+st.subheader("Local Transaction Graph")
+
+local_df, selected_info = get_local_transactions(
+    result,
+    selected_idx=selected_idx,
+    time_window_hours=time_window_hours,
+    max_edges=max_edges,
+)
+
+graph_path = build_pyvis_graph(
+    local_df=local_df,
+    selected_sender=selected_info["sender"],
+    selected_receiver=selected_info["receiver"],
+    output_path="reports/figures/local_transaction_graph.html",
+)
+
+with open(graph_path, "r", encoding="utf-8") as f:
+    html = f.read()
+
+components.html(html, height=700, scrolling=True)
+
+st.subheader("Download Results")
+csv = result.to_csv(index=False).encode("utf-8")
+st.download_button(
+    "Download scored transactions",
+    data=csv,
+    file_name="scored_transactions.csv",
+    mime="text/csv",
+)
