@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import joblib
 import pandas as pd
@@ -11,6 +17,46 @@ from src.data.load_data import load_transactions
 from src.features.tabular_features import add_basic_transaction_features, make_model_matrix
 from src.features.graph_features import add_account_graph_aggregate_features
 from src.visualization.graph_viz import get_local_transactions, build_pyvis_graph
+
+
+def build_explanation_table(row: pd.Series) -> pd.DataFrame:
+    """Create a small explanation table for the selected transaction."""
+    feature_labels = {
+        "amount_paid": "Transaction amount paid",
+        "amount_received": "Transaction amount received",
+        "amount_delta": "Paid - received amount difference",
+        "log_amount_paid": "Log amount paid",
+        "is_cross_bank": "Cross-bank transaction",
+        "is_cross_currency": "Cross-currency transaction",
+
+        "sender_n_sent": "Sender total outgoing transactions",
+        "sender_total_sent": "Sender total outgoing amount",
+        "sender_unique_receivers": "Sender unique receivers",
+        "sender_n_received": "Sender total incoming transactions",
+        "sender_total_received": "Sender total incoming amount",
+        "sender_unique_senders": "Sender unique senders",
+
+        "receiver_n_sent": "Receiver total outgoing transactions",
+        "receiver_total_sent": "Receiver total outgoing amount",
+        "receiver_unique_receivers": "Receiver unique receivers",
+        "receiver_n_received": "Receiver total incoming transactions",
+        "receiver_total_received": "Receiver total incoming amount",
+        "receiver_unique_senders": "Receiver unique senders",
+    }
+
+    rows = []
+
+    for feature, label in feature_labels.items():
+        if feature in row.index:
+            value = row[feature]
+
+            rows.append({
+                "Feature": feature,
+                "Meaning": label,
+                "Value": value,
+            })
+
+    return pd.DataFrame(rows)
 
 
 st.set_page_config(page_title="AML Graph Scoring Demo", layout="wide")
@@ -116,6 +162,21 @@ st.write({
     "predicted_label": int(selected_row.get("predicted_label", 0)),
 })
 
+st.subheader("Graph-Based Explanation Features")
+
+explanation_df = build_explanation_table(selected_row)
+
+if explanation_df.empty:
+    st.info("No explanation features available for this transaction.")
+else:
+    st.dataframe(explanation_df, use_container_width=True)
+
+    st.caption(
+        "These features summarize the selected transaction and the surrounding account behavior. "
+        "High outgoing/incoming counts, repeated counterparties, cross-bank movement, and high total flow "
+        "can indicate suspicious transaction patterns such as fan-in, fan-out, or layering."
+    )
+
 st.subheader("Local Transaction Graph")
 
 local_df, selected_info = get_local_transactions(
@@ -136,6 +197,25 @@ with open(graph_path, "r", encoding="utf-8") as f:
     html = f.read()
 
 components.html(html, height=700, scrolling=True)
+
+st.subheader("Local Graph Summary")
+
+local_accounts = set(local_df["sender_id"]).union(set(local_df["receiver_id"]))
+
+summary_data = {
+    "Local transactions shown": len(local_df),
+    "Unique accounts shown": len(local_accounts),
+    "Unique senders": local_df["sender_id"].nunique(),
+    "Unique receivers": local_df["receiver_id"].nunique(),
+}
+
+if "amount_paid" in local_df.columns:
+    summary_data["Total amount in local graph"] = float(local_df["amount_paid"].sum())
+
+if "is_laundering" in local_df.columns:
+    summary_data["Known laundering labels in local graph"] = int(local_df["is_laundering"].sum())
+
+st.write(summary_data)
 
 st.subheader("Download Results")
 csv = result.to_csv(index=False).encode("utf-8")
