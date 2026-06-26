@@ -37,7 +37,7 @@ def find_best_threshold(y_true, scores, metric: str = "f1") -> dict:
         "best_f1": float(best["f1"]),
         "best_precision": float(best["precision"]),
         "best_recall": float(best["recall"]),
-        "alert_count": int(best["alert_count"]),
+        "best_alert_count": int(best["alert_count"]),
         "threshold_table": df,
     }
 
@@ -58,3 +58,15 @@ def recall_at_k(y_true, scores, k: int) -> float:
 
     top_k = temp.sort_values("score", ascending=False).head(k)
     return float(top_k["y"].sum() / total_positive)
+
+def top_k_table(y_true, scores, k_values=(50, 100, 200, 500, 1000)) -> pd.DataFrame:
+    rows = []
+
+    for k in k_values:
+        rows.append({
+            "k": k,
+            "precision_at_k": precision_at_k(y_true, scores, k),
+            "recall_at_k": recall_at_k(y_true, scores, k),
+        })
+
+    return pd.DataFrame(rows)
