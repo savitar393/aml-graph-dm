@@ -86,9 +86,63 @@ def make_model_matrix(
         "receiver_unique_senders",
     ]
 
+    historical_graph_features = [
+        "sender_n_sent_prev",
+        "sender_total_sent_prev",
+        "receiver_n_received_prev",
+        "receiver_total_received_prev",
+        "pair_n_prev",
+        "pair_total_amount_prev",
+        "sender_unique_receivers_prev",
+        "receiver_unique_senders_prev",
+        "fan_out_score",
+        "fan_in_score",
+        "pair_repeat_score",
+        "sender_avg_sent_prev",
+        "receiver_avg_received_prev",
+        "sender_amount_ratio",
+        "receiver_amount_ratio",
+        "graph_activity_score",
+    ]
+
+    rolling_graph_features = [
+        "sender_tx_count_1h_prev",
+        "sender_amount_sum_1h_prev",
+        "sender_amount_mean_1h_prev",
+        "sender_amount_max_1h_prev",
+        "receiver_tx_count_1h_prev",
+        "receiver_amount_sum_1h_prev",
+        "receiver_amount_mean_1h_prev",
+        "receiver_amount_max_1h_prev",
+
+        "sender_tx_count_24h_prev",
+        "sender_amount_sum_24h_prev",
+        "sender_amount_mean_24h_prev",
+        "sender_amount_max_24h_prev",
+        "receiver_tx_count_24h_prev",
+        "receiver_amount_sum_24h_prev",
+        "receiver_amount_mean_24h_prev",
+        "receiver_amount_max_24h_prev",
+
+        "sender_time_since_last_tx_hours",
+        "receiver_time_since_last_tx_hours",
+
+        "rolling_fan_out_score_1h",
+        "rolling_fan_in_score_1h",
+        "amount_vs_sender_mean_1h",
+        "amount_vs_receiver_mean_1h",
+
+        "rolling_fan_out_score_24h",
+        "rolling_fan_in_score_24h",
+        "amount_vs_sender_mean_24h",
+        "amount_vs_receiver_mean_24h",
+    ]
+
     features: List[str] = [c for c in numeric_features if c in df.columns]
     if include_graph_features:
         features.extend([c for c in graph_features if c in df.columns])
+        features.extend([c for c in historical_graph_features if c in df.columns])
+        features.extend([c for c in rolling_graph_features if c in df.columns])
 
     X_num = df[features].fillna(0)
 

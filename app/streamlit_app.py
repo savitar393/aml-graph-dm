@@ -16,6 +16,8 @@ import streamlit.components.v1 as components
 from src.data.load_data import load_transactions
 from src.features.tabular_features import add_basic_transaction_features, make_model_matrix
 from src.features.graph_features import add_account_graph_aggregate_features
+from src.features.historical_graph_features import add_historical_graph_features
+from src.features.rolling_graph_features import add_rolling_graph_features
 from src.visualization.graph_viz import get_local_transactions, build_pyvis_graph
 
 
@@ -42,6 +44,39 @@ def build_explanation_table(row: pd.Series) -> pd.DataFrame:
         "receiver_n_received": "Receiver total incoming transactions",
         "receiver_total_received": "Receiver total incoming amount",
         "receiver_unique_senders": "Receiver unique senders",
+        
+        "sender_n_sent_prev": "Previous outgoing transactions by sender",
+        "sender_total_sent_prev": "Previous total amount sent by sender",
+        "receiver_n_received_prev": "Previous incoming transactions to receiver",
+        "receiver_total_received_prev": "Previous total amount received by receiver",
+        "pair_n_prev": "Previous repeated transactions from sender to receiver",
+        "pair_total_amount_prev": "Previous total amount from sender to receiver",
+        "sender_unique_receivers_prev": "Previous unique receivers of sender",
+        "receiver_unique_senders_prev": "Previous unique senders to receiver",
+        "fan_out_score": "Fan-out behavior score",
+        "fan_in_score": "Fan-in behavior score",
+        "pair_repeat_score": "Repeated-pair behavior score",
+        "sender_amount_ratio": "Current amount compared to sender historical average",
+        "receiver_amount_ratio": "Current amount compared to receiver historical average",
+        "graph_activity_score": "Combined historical graph activity score",
+
+        "sender_tx_count_1h_prev": "Sender transactions in previous 1 hour",
+        "sender_amount_sum_1h_prev": "Sender total amount in previous 1 hour",
+        "receiver_tx_count_1h_prev": "Receiver transactions in previous 1 hour",
+        "receiver_amount_sum_1h_prev": "Receiver total received in previous 1 hour",
+
+        "sender_tx_count_24h_prev": "Sender transactions in previous 24 hours",
+        "sender_amount_sum_24h_prev": "Sender total amount in previous 24 hours",
+        "receiver_tx_count_24h_prev": "Receiver transactions in previous 24 hours",
+        "receiver_amount_sum_24h_prev": "Receiver total received in previous 24 hours",
+
+        "sender_time_since_last_tx_hours": "Hours since sender's previous transaction",
+        "receiver_time_since_last_tx_hours": "Hours since receiver's previous transaction",
+
+        "rolling_fan_out_score_1h": "Short-term fan-out score, 1 hour",
+        "rolling_fan_in_score_1h": "Short-term fan-in score, 1 hour",
+        "rolling_fan_out_score_24h": "Short-term fan-out score, 24 hours",
+        "rolling_fan_in_score_24h": "Short-term fan-in score, 24 hours",
     }
 
     rows = []
@@ -98,7 +133,62 @@ df = load_transactions(temp_path)
 df = add_basic_transaction_features(df)
 
 if feature_set == "raw_plus_graph":
-    df = add_account_graph_aggregate_features(df)
+    needs_static_graph = any(
+        col in feature_columns
+        for col in [
+            "sender_n_sent",
+            "sender_total_sent",
+            "sender_unique_receivers",
+            "receiver_n_received",
+            "receiver_total_received",
+            "receiver_unique_senders",
+        ]
+    )
+
+    needs_historical_graph = any(
+        col in feature_columns
+        for col in [
+            "sender_n_sent_prev",
+            "sender_total_sent_prev",
+            "receiver_n_received_prev",
+            "receiver_total_received_prev",
+            "pair_n_prev",
+            "pair_total_amount_prev",
+            "fan_out_score",
+            "fan_in_score",
+            "pair_repeat_score",
+            "graph_activity_score",
+        ]
+    )
+
+    needs_rolling_graph = any(
+        col in feature_columns
+        for col in [
+            "sender_tx_count_1h_prev",
+            "sender_amount_sum_1h_prev",
+            "receiver_tx_count_1h_prev",
+            "receiver_amount_sum_1h_prev",
+            "sender_tx_count_24h_prev",
+            "sender_amount_sum_24h_prev",
+            "receiver_tx_count_24h_prev",
+            "receiver_amount_sum_24h_prev",
+            "sender_time_since_last_tx_hours",
+            "receiver_time_since_last_tx_hours",
+            "rolling_fan_out_score_1h",
+            "rolling_fan_in_score_1h",
+            "rolling_fan_out_score_24h",
+            "rolling_fan_in_score_24h",
+        ]
+    )
+
+    if needs_static_graph:
+        df = add_account_graph_aggregate_features(df)
+
+    if needs_historical_graph:
+        df = add_historical_graph_features(df)
+
+    if needs_rolling_graph:
+        df = add_rolling_graph_features(df)
 
 X, y = make_model_matrix(df, include_graph_features=(feature_set == "raw_plus_graph"))
 
