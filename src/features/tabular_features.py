@@ -138,11 +138,38 @@ def make_model_matrix(
         "amount_vs_receiver_mean_24h",
     ]
 
+    advanced_graph_features = [
+        "sender_in_degree_prev",
+        "sender_out_degree_prev",
+        "receiver_in_degree_prev",
+        "receiver_out_degree_prev",
+
+        "sender_in_amount_prev",
+        "sender_out_amount_prev",
+        "receiver_in_amount_prev",
+        "receiver_out_amount_prev",
+
+        "reverse_pair_n_prev",
+        "reverse_pair_amount_prev",
+        "has_reverse_edge_prev",
+
+        "reciprocal_pair_score",
+        "cycle_proxy_score",
+        "sender_centrality_balance_prev",
+        "receiver_centrality_balance_prev",
+
+        "sender_in_out_degree_ratio_prev",
+        "receiver_in_out_degree_ratio_prev",
+        "sender_flow_balance_prev",
+        "receiver_flow_balance_prev",
+    ]
+
     features: List[str] = [c for c in numeric_features if c in df.columns]
     if include_graph_features:
         features.extend([c for c in graph_features if c in df.columns])
         features.extend([c for c in historical_graph_features if c in df.columns])
         features.extend([c for c in rolling_graph_features if c in df.columns])
+        features.extend([c for c in advanced_graph_features if c in df.columns])
 
     X_num = df[features].fillna(0)
 
