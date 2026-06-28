@@ -18,6 +18,9 @@ kagglehub>=0.2.9
 notebook==7.5
 pyvis>=0.3.2
 
+# Seperate env cuz shap complained abt numpy downgraded
+# node2vec
+
 # Optional, for GNN:
 # torch
 # torch-geometric

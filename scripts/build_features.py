@@ -9,6 +9,7 @@ from src.features.graph_features import add_account_graph_aggregate_features
 from src.features.historical_graph_features import add_historical_graph_features
 from src.features.rolling_graph_features import add_rolling_graph_features
 from src.features.advanced_graph_features import add_temporal_centrality_and_motif_features
+from src.features.snapshot_graph_features import add_snapshot_pagerank_community_features
 
 
 def output_name(dataset: str) -> str:
@@ -23,6 +24,7 @@ def main() -> None:
     parser.add_argument("--use-historical-graph", action="store_true")
     parser.add_argument("--use-rolling-graph", action="store_true")
     parser.add_argument("--use-advanced-graph", action="store_true")
+    parser.add_argument("--use-snapshot-graph", action="store_true")
     args = parser.parse_args()
 
     raw_path = Path(f"data/raw/{args.dataset}_Trans.csv")
@@ -49,6 +51,10 @@ def main() -> None:
     if args.use_advanced_graph:
         print("Adding temporal centrality and motif/cycle-proxy features...")
         df = add_temporal_centrality_and_motif_features(df)
+
+    if args.use_snapshot_graph:
+        print("Adding PageRank and community snapshot features...")
+        df = add_snapshot_pagerank_community_features(df)
     save_parquet(df, out_path)
 
     print("Saved:", out_path)

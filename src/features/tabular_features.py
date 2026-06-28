@@ -164,12 +164,23 @@ def make_model_matrix(
         "receiver_flow_balance_prev",
     ]
 
+    snapshot_graph_features = [
+        "sender_pagerank_24h_prev",
+        "receiver_pagerank_24h_prev",
+        "sender_community_size_24h_prev",
+        "receiver_community_size_24h_prev",
+        "same_community_24h_prev",
+        "sender_seen_in_snapshot_24h",
+        "receiver_seen_in_snapshot_24h",
+    ]
+
     features: List[str] = [c for c in numeric_features if c in df.columns]
     if include_graph_features:
         features.extend([c for c in graph_features if c in df.columns])
         features.extend([c for c in historical_graph_features if c in df.columns])
         features.extend([c for c in rolling_graph_features if c in df.columns])
         features.extend([c for c in advanced_graph_features if c in df.columns])
+        features.extend([c for c in snapshot_graph_features if c in df.columns])
 
     X_num = df[features].fillna(0)
 

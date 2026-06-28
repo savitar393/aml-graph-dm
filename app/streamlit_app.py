@@ -8,6 +8,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+temp_path = PROJECT_ROOT / "data/sample/uploaded_transactions.csv"
+
 import joblib
 import pandas as pd
 import streamlit as st
@@ -18,7 +20,45 @@ from src.features.tabular_features import add_basic_transaction_features, make_m
 from src.features.graph_features import add_account_graph_aggregate_features
 from src.features.historical_graph_features import add_historical_graph_features
 from src.features.rolling_graph_features import add_rolling_graph_features
+from src.features.advanced_graph_features import add_temporal_centrality_and_motif_features
 from src.visualization.graph_viz import get_local_transactions, build_pyvis_graph
+
+
+def make_node2vec_embedding_features(df, embeddings, dimensions):
+    import numpy as np
+    import pandas as pd
+
+    sender_arr = np.zeros((len(df), dimensions), dtype=np.float32)
+    receiver_arr = np.zeros((len(df), dimensions), dtype=np.float32)
+
+    sender_known = np.zeros(len(df), dtype=np.int8)
+    receiver_known = np.zeros(len(df), dtype=np.int8)
+
+    senders = df["sender_id"].astype(str).to_numpy()
+    receivers = df["receiver_id"].astype(str).to_numpy()
+
+    for i, account in enumerate(senders):
+        emb = embeddings.get(account)
+        if emb is not None:
+            sender_arr[i] = emb
+            sender_known[i] = 1
+
+    for i, account in enumerate(receivers):
+        emb = embeddings.get(account)
+        if emb is not None:
+            receiver_arr[i] = emb
+            receiver_known[i] = 1
+
+    data = {}
+
+    for j in range(dimensions):
+        data[f"sender_n2v_{j}"] = sender_arr[:, j]
+        data[f"receiver_n2v_{j}"] = receiver_arr[:, j]
+
+    data["sender_n2v_known"] = sender_known
+    data["receiver_n2v_known"] = receiver_known
+
+    return pd.DataFrame(data)
 
 
 def build_explanation_table(row: pd.Series) -> pd.DataFrame:
@@ -77,6 +117,22 @@ def build_explanation_table(row: pd.Series) -> pd.DataFrame:
         "rolling_fan_in_score_1h": "Short-term fan-in score, 1 hour",
         "rolling_fan_out_score_24h": "Short-term fan-out score, 24 hours",
         "rolling_fan_in_score_24h": "Short-term fan-in score, 24 hours",
+
+        "sender_in_degree_prev": "Previous incoming degree of sender",
+        "sender_out_degree_prev": "Previous outgoing degree of sender",
+        "receiver_in_degree_prev": "Previous incoming degree of receiver",
+        "receiver_out_degree_prev": "Previous outgoing degree of receiver",
+        "reverse_pair_n_prev": "Previous reverse-direction transactions",
+        "reverse_pair_amount_prev": "Previous reverse-direction total amount",
+        "has_reverse_edge_prev": "Whether reverse transaction existed before",
+        "reciprocal_pair_score": "Reciprocal transaction behavior score",
+        "cycle_proxy_score": "Cycle-like transaction proxy score",
+        "sender_centrality_balance_prev": "Sender previous in-degree minus out-degree",
+        "receiver_centrality_balance_prev": "Receiver previous in-degree minus out-degree",
+        "sender_flow_balance_prev": "Sender previous inflow minus outflow",
+        "receiver_flow_balance_prev": "Receiver previous inflow minus outflow",
+        "sender_n2v_known": "Sender account has node2vec embedding",
+        "receiver_n2v_known": "Receiver account has node2vec embedding",
     }
 
     rows = []
@@ -102,11 +158,13 @@ st.write(
     "a local transaction graph around selected suspicious alerts."
 )
 
-model_path = Path("models/best_model_bundle.joblib")
+node2vec_path = PROJECT_ROOT / "models/node2vec_model_bundle.joblib"
+default_path = PROJECT_ROOT / "models/best_model_bundle.joblib"
 
-if not model_path.exists():
-    st.error("No trained model bundle found at models/best_model_bundle.joblib.")
-    st.stop()
+if node2vec_path.exists():
+    model_path = node2vec_path
+else:
+    model_path = default_path
 
 bundle = joblib.load(model_path)
 model = bundle["model"]
@@ -121,76 +179,75 @@ score_threshold = st.sidebar.slider("Score threshold", 0.0, 1.0, float(threshold
 time_window_hours = st.sidebar.selectbox("Graph time window", [6, 12, 24, 72, 168], index=2)
 max_edges = st.sidebar.slider("Maximum graph edges", min_value=20, max_value=300, value=120)
 
+st.sidebar.divider()
+show_model_results = st.sidebar.checkbox("Show model comparison results", value=True)
+
 if uploaded is None:
     st.info("Upload a transaction CSV to start scoring.")
     st.stop()
 
-temp_path = Path("data/sample/uploaded_transactions.csv")
 temp_path.parent.mkdir(parents=True, exist_ok=True)
 temp_path.write_bytes(uploaded.getvalue())
 
 df = load_transactions(temp_path)
 df = add_basic_transaction_features(df)
 
-if feature_set == "raw_plus_graph":
-    needs_static_graph = any(
-        col in feature_columns
-        for col in [
-            "sender_n_sent",
-            "sender_total_sent",
-            "sender_unique_receivers",
-            "receiver_n_received",
-            "receiver_total_received",
-            "receiver_unique_senders",
-        ]
+needs_graph = any("graph" in str(feature_set) for _ in [0]) or any(
+    col in feature_columns
+    for col in [
+        "sender_n_sent_prev",
+        "sender_tx_count_1h_prev",
+        "sender_in_degree_prev",
+        "sender_n2v_0",
+    ]
+)
+
+if needs_graph:
+    df = add_historical_graph_features(df)
+    df = add_rolling_graph_features(df)
+    df = add_temporal_centrality_and_motif_features(df)
+
+needs_static_graph = any(
+    col in feature_columns
+    for col in [
+        "sender_n_sent",
+        "sender_total_sent",
+        "sender_unique_receivers",
+        "receiver_n_received",
+        "receiver_total_received",
+        "receiver_unique_senders",
+    ]
+)
+
+if needs_static_graph:
+    df = add_account_graph_aggregate_features(df)
+
+include_graph_features = any(
+    col in feature_columns
+    for col in [
+        "sender_n_sent_prev",
+        "sender_tx_count_1h_prev",
+        "sender_in_degree_prev",
+        "cycle_proxy_score",
+    ]
+)
+
+X, y = make_model_matrix(df, include_graph_features=include_graph_features)
+
+if "node2vec_embeddings" in bundle:
+    n2v_features = make_node2vec_embedding_features(
+        df,
+        bundle["node2vec_embeddings"],
+        bundle["node2vec_dimensions"],
     )
 
-    needs_historical_graph = any(
-        col in feature_columns
-        for col in [
-            "sender_n_sent_prev",
-            "sender_total_sent_prev",
-            "receiver_n_received_prev",
-            "receiver_total_received_prev",
-            "pair_n_prev",
-            "pair_total_amount_prev",
-            "fan_out_score",
-            "fan_in_score",
-            "pair_repeat_score",
-            "graph_activity_score",
-        ]
+    X = pd.concat(
+        [X.reset_index(drop=True), n2v_features.reset_index(drop=True)],
+        axis=1,
     )
 
-    needs_rolling_graph = any(
-        col in feature_columns
-        for col in [
-            "sender_tx_count_1h_prev",
-            "sender_amount_sum_1h_prev",
-            "receiver_tx_count_1h_prev",
-            "receiver_amount_sum_1h_prev",
-            "sender_tx_count_24h_prev",
-            "sender_amount_sum_24h_prev",
-            "receiver_tx_count_24h_prev",
-            "receiver_amount_sum_24h_prev",
-            "sender_time_since_last_tx_hours",
-            "receiver_time_since_last_tx_hours",
-            "rolling_fan_out_score_1h",
-            "rolling_fan_in_score_1h",
-            "rolling_fan_out_score_24h",
-            "rolling_fan_in_score_24h",
-        ]
-    )
-
-    if needs_static_graph:
-        df = add_account_graph_aggregate_features(df)
-
-    if needs_historical_graph:
-        df = add_historical_graph_features(df)
-
-    if needs_rolling_graph:
-        df = add_rolling_graph_features(df)
-
-X, y = make_model_matrix(df, include_graph_features=(feature_set == "raw_plus_graph"))
+df["sender_n2v_known"] = n2v_features["sender_n2v_known"].values
+df["receiver_n2v_known"] = n2v_features["receiver_n2v_known"].values
 
 # Align feature columns with training.
 X = X.reindex(columns=feature_columns, fill_value=0)
@@ -280,7 +337,7 @@ graph_path = build_pyvis_graph(
     local_df=local_df,
     selected_sender=selected_info["sender"],
     selected_receiver=selected_info["receiver"],
-    output_path="reports/figures/local_transaction_graph.html",
+    output_path=str(PROJECT_ROOT / "reports/figures/local_transaction_graph.html"),
 )
 
 with open(graph_path, "r", encoding="utf-8") as f:
@@ -315,3 +372,36 @@ st.download_button(
     file_name="scored_transactions.csv",
     mime="text/csv",
 )
+
+
+if show_model_results:
+    st.subheader("Model Comparison Results")
+
+    comparison_path = PROJECT_ROOT / "reports/tables/four_model_comparison_temporal_graph_final.csv"
+    node2vec_metrics_path = PROJECT_ROOT / "reports/tables/lgbm_node2vec_metrics_final.csv"
+    topk_path = PROJECT_ROOT / "reports/tables/top_k_evaluation_node2vec_final.csv"
+
+    if comparison_path.exists():
+        comparison_df = pd.read_csv(comparison_path)
+        st.write("Four-algorithm comparison on temporal graph feature set")
+        st.dataframe(comparison_df, use_container_width=True)
+
+        metric_cols = ["model", "val_pr_auc", "test_pr_auc", "test_f1", "test_precision", "test_recall"]
+        available_metric_cols = [c for c in metric_cols if c in comparison_df.columns]
+
+        if available_metric_cols:
+            chart_df = comparison_df[available_metric_cols].copy()
+            st.bar_chart(chart_df.set_index("model")[["val_pr_auc", "test_f1"]])
+
+    else:
+        st.info("Four-model comparison table not found.")
+
+    if node2vec_metrics_path.exists():
+        node2vec_df = pd.read_csv(node2vec_metrics_path)
+        st.write("Final node2vec-enhanced LightGBM result")
+        st.dataframe(node2vec_df, use_container_width=True)
+
+    if topk_path.exists():
+        topk_df = pd.read_csv(topk_path)
+        st.write("Top-K evaluation for final model")
+        st.dataframe(topk_df, use_container_width=True)
